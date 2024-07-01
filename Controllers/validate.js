@@ -1,3 +1,4 @@
+import * as admin from "firebase-admin";
 import User from "../Models/Schema.js";
 // import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
@@ -12,8 +13,13 @@ import Blog from "../Models/Blog.js";
 import Notification from "../Models/Notification.js";
 import Comment from "../Models/Comment.js";
 import generateToken from "../Utils/index.js";
+import { readFileSync } from "fs";
+import path from "path";
+
 // import cors from 'cors'
 // import express from "express";
+
+// validate.js
 
 dotenv.config();
 
@@ -22,7 +28,7 @@ admin.initializeApp({
 });
 
 let emailRegex = /^[\w\d]+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/;
- // regex for email
+// regex for email
 let passwordRegex = /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{6,20}$/; // regex for password
 
 //settingup s3 bucket
@@ -44,6 +50,18 @@ const uploadToS3 = async () => {
     ContentType: "image/jpeg",
   });
 };
+const serviceAccountPath =
+  process.env.FIREBASE_CONFIG_PATH ||
+  path.resolve(
+    __dirname,
+    "../blog-website-8411c-firebase-adminsdk-jx7sb-e28aa02dae.json"
+  );
+const serviceAccount = JSON.parse(readFileSync(serviceAccountPath, "utf8"));
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
 export const verifyJWT = (req, res, next) => {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
@@ -88,8 +106,6 @@ const generateUserName = async (email) => {
 
   return username;
 };
-;
-
 //upload  image URl route
 export const uploadUrl = async (req, res) => {
   uploadToS3()
@@ -117,12 +133,10 @@ export const userDetails = async (req, res) => {
   if (!password || password.length < 6) {
     return res.status(401).send("Password must be 6 to  20 characters long");
   } else if (!passwordRegex.test(password)) {
-    return res
-      .status(404)
-      .json({
-        error:
-          "The Password should contain at least one upper case letter,one lowercase letter along with one numeric",
-      });
+    return res.status(404).json({
+      error:
+        "The Password should contain at least one upper case letter,one lowercase letter along with one numeric",
+    });
   }
 
   bcrypt.hash(password, 10, async (err, hashed_pwd) => {
@@ -236,12 +250,10 @@ export const googleAuth = async (req, res) => {
       return res.status(200).json(formatData(user));
     })
     .catch((err) =>
-      res
-        .status(500)
-        .json({
-          "Error Occured":
-            "Failed to authenticate with google. Try with  different account.",
-        })
+      res.status(500).json({
+        "Error Occured":
+          "Failed to authenticate with google. Try with  different account.",
+      })
     );
 };
 
@@ -303,51 +315,64 @@ export const googleAuth = async (req, res) => {
 //     );
 // };
 
-
-export const changePassword = (req,res) => {
+export const changePassword = (req, res) => {
   let { currentPassword, newPassword } = req.body;
-   if (
-     !passwordRegex.test(currentPassword) ||
-     !passwordRegex.test(newPassword)
-   ) {
-     return res.status(403).json({error:"The Password should contain at least one upper case letter, one lowercase letter along with one numeric"
-   });
+  if (
+    !passwordRegex.test(currentPassword) ||
+    !passwordRegex.test(newPassword)
+  ) {
+    return res.status(403).json({
+      error:
+        "The Password should contain at least one upper case letter, one lowercase letter along with one numeric",
+    });
   }
-  User.findOne({ _id: req.user }).then((user) => {
-    //checks the user is a google_auth or not and inform the user you won't change the password
-    if (user.google_auth) {
-         return res.status(403).json({error: "You are logged in with google, you won't able to change the password"});
-    }
-    bcrypt.compare(currentPassword, user.personal_info.password, (err, result) => {
-      if (err) {
-        return res.status(500).json({ error: "Some error will be occured while changing the password" })
+  User.findOne({ _id: req.user })
+    .then((user) => {
+      //checks the user is a google_auth or not and inform the user you won't change the password
+      if (user.google_auth) {
+        return res.status(403).json({
+          error:
+            "You are logged in with google, you won't able to change the password",
+        });
       }
-      if(!result) {
-             return res.status(403).json({error:"Incorrect current password"})     
-      }
-      bcrypt.hash(newPassword, 10, (err,hashed_pwd)=> {
-        User.findOneAndUpdate(
-          { _id: req.user },
-          { "personal_info.password": hashed_pwd }
-        )
-          .then((u) => {
+      bcrypt.compare(
+        currentPassword,
+        user.personal_info.password,
+        (err, result) => {
+          if (err) {
+            return res.status(500).json({
+              error: "Some error will be occured while changing the password",
+            });
+          }
+          if (!result) {
             return res
-              .status(200)
-              .json({ status: "Successfully changed your password!" });
-          })
-          .catch((e) => {
-            console.log("ERROR IN PASSWORD CHANGE", e);
-            return res
-              .status(500)
-              .json({ error: "Server Error! Please try again later." });
+              .status(403)
+              .json({ error: "Incorrect current password" });
+          }
+          bcrypt.hash(newPassword, 10, (err, hashed_pwd) => {
+            User.findOneAndUpdate(
+              { _id: req.user },
+              { "personal_info.password": hashed_pwd }
+            )
+              .then((u) => {
+                return res
+                  .status(200)
+                  .json({ status: "Successfully changed your password!" });
+              })
+              .catch((e) => {
+                console.log("ERROR IN PASSWORD CHANGE", e);
+                return res
+                  .status(500)
+                  .json({ error: "Server Error! Please try again later." });
+              });
           });
-      })
+        }
+      );
     })
-
-  }).catch(err => {
-     res.status(500).json({error: 'Error in server!'});
-   })
-}
+    .catch((err) => {
+      res.status(500).json({ error: "Error in server!" });
+    });
+};
 
 export const latestBlog = (req, res) => {
   let { page } = req.body;
@@ -480,77 +505,91 @@ export const getProfile = (req, res) => {
 
 export const updateProfileImg = (req, res) => {
   let { url } = req.body;
-  User.findOneAndUpdate({ _id: req.user }, { "personal_info.profile_img": url }).then(() => {
-    return res.status(200).json({profile_img:url})
-  }).catch(err => {
-    return res.status(500).json({ error: err.message });
-  })
-}
+  User.findOneAndUpdate({ _id: req.user }, { "personal_info.profile_img": url })
+    .then(() => {
+      return res.status(200).json({ profile_img: url });
+    })
+    .catch((err) => {
+      return res.status(500).json({ error: err.message });
+    });
+};
 
-export const updateProfile = (req,res) => {
+export const updateProfile = (req, res) => {
   let { username, bio, social_links } = req.body;
 
   let bioLimit = 150;
-  
+
   if (!username || username.length < 3) {
-    return res.status(403).json({error:"Username should be atleast 3 letters long."});
+    return res
+      .status(403)
+      .json({ error: "Username should be atleast 3 letters long." });
   }
-  if (bio.length > bioLimit) { 
-    return res.status(403).json({error:`Bio is too long! It should contain maximum ${bioLimit} characters.`});
+  if (bio.length > bioLimit) {
+    return res.status(403).json({
+      error: `Bio is too long! It should contain maximum ${bioLimit} characters.`,
+    });
   }
   let socialLinksArr = Object.keys(social_links);
   try {
-    for (let i = 0; i < socialLinksArr.length; i++){
+    for (let i = 0; i < socialLinksArr.length; i++) {
       if (social_links[socialLinksArr[i]].length) {
         let hostname = new URL(social_links[socialLinksArr[i]]).hostname;
 
-        if (!hostname.includes(`${socialLinksArr[i]}.com`) && socialLinksArr[i] !== 'website') {
-          return res.status(403).json({error:`${socialLinksArr[i]} link is invalid. You must enter a full links`})
+        if (
+          !hostname.includes(`${socialLinksArr[i]}.com`) &&
+          socialLinksArr[i] !== "website"
+        ) {
+          return res.status(403).json({
+            error: `${socialLinksArr[i]} link is invalid. You must enter a full links`,
+          });
         }
-
-      } 
-      
+      }
     }
-
-  } catch (err){
-    return res.status(500).json({ error: "You must provide full social links with http(s) included" });
+  } catch (err) {
+    return res.status(500).json({
+      error: "You must provide full social links with http(s) included",
+    });
   }
 
   let updateObj = {
     "personal_info.username": username,
     "personal_info.bio": bio,
-    social_links
-  }
+    social_links,
+  };
   User.findOneAndUpdate({ _id: req.user }, updateObj, {
-    runValidators: true
-  }).then(() => {
-    return res.status(200).json({ username });
-  }).catch(err => {
-    if (err.code == 11000) {
-      return res.status(409).send("Username already exists.");
-    }
-    return res.status(500).json({ error: err.message });
+    runValidators: true,
   })
-}
-
+    .then(() => {
+      return res.status(200).json({ username });
+    })
+    .catch((err) => {
+      if (err.code == 11000) {
+        return res.status(409).send("Username already exists.");
+      }
+      return res.status(500).json({ error: err.message });
+    });
+};
 
 export const newNotification = (req, res) => {
-
   let user_id = req.user;
 
-  Notification.exists({ notification_for: user_id, seen: false, user: { $ne: user_id } }).then(result => {
-    if (result) {
-         return res.status(200).json({new_notification_available:true})
-    } else {
-      return res.status(200).json({new_notification_available:false});
-    }
+  Notification.exists({
+    notification_for: user_id,
+    seen: false,
+    user: { $ne: user_id },
   })
-    .catch(err => {
+    .then((result) => {
+      if (result) {
+        return res.status(200).json({ new_notification_available: true });
+      } else {
+        return res.status(200).json({ new_notification_available: false });
+      }
+    })
+    .catch((err) => {
       console.log(err.message);
       return res.status(500).json({ error: err.message });
-})
-
-}
+    });
+};
 
 export const createBlog = (req, res) => {
   let authorId = req.user;
@@ -707,7 +746,7 @@ export const isLikedByUser = (req, res) => {
 
 export const addComment = (req, res) => {
   let user_id = req.user;
-  let { _id, comment, blog_author,replying_to,notification_id } = req.body;
+  let { _id, comment, blog_author, replying_to, notification_id } = req.body;
   if (!comment.length) {
     return res.status(404).json({ error: "The field cannot be empty." });
   }
@@ -719,246 +758,309 @@ export const addComment = (req, res) => {
     comment,
     commented_by: user_id,
   };
-  if (replying_to) { 
-    commentObj.parent = replying_to; 
+  if (replying_to) {
+    commentObj.parent = replying_to;
     commentObj.isReply = true;
   }
-  new Comment(commentObj).save().then(async commentFile => {
+  new Comment(commentObj).save().then(async (commentFile) => {
     let { comment, commentedAt, children } = commentFile;
     Blog.findOneAndUpdate(
       { _id },
       {
-        $push: { "comments": commentFile._id },
+        $push: { comments: commentFile._id },
         $inc: {
           "activity.total_comments": 1,
-          "activity.total_parent_comments": replying_to ?0 : 1,
+          "activity.total_parent_comments": replying_to ? 0 : 1,
         },
       }
     ).then((blog) => {
       console.log("New comment added");
     });
     let notificationObj = {
-      type:replying_to ?"reply" :"comment",
+      type: replying_to ? "reply" : "comment",
       blog: _id,
       notification_for: blog_author,
       user: user_id,
-      comment:commentFile._id
-      
-    }
+      comment: commentFile._id,
+    };
     if (replying_to) {
-  notificationObj.replied_on_comment = replying_to;
-  await Comment.findOneAndUpdate({ _id: replying_to }, { $push: { children: commentFile._id } }).then(replyingToComment => {
-    if (replyingToComment) {
-      notificationObj.notification_for = replyingToComment.commented_by;
-    } else {
-      console.error("Error: Comment not found for replying_to ID:", replying_to);
-    }
-  }).catch(error => {
-    console.error("Error fetching comment:", error);
-  });
+      notificationObj.replied_on_comment = replying_to;
+      await Comment.findOneAndUpdate(
+        { _id: replying_to },
+        { $push: { children: commentFile._id } }
+      )
+        .then((replyingToComment) => {
+          if (replyingToComment) {
+            notificationObj.notification_for = replyingToComment.commented_by;
+          } else {
+            console.error(
+              "Error: Comment not found for replying_to ID:",
+              replying_to
+            );
+          }
+        })
+        .catch((error) => {
+          console.error("Error fetching comment:", error);
+        });
 
       if (notification_id) {
-        Notification.findOneAndUpdate({ _id: notification_id }, { reply: commentFile._id }).then(notification => {
-          console.log('notification updated')
-        })
+        Notification.findOneAndUpdate(
+          { _id: notification_id },
+          { reply: commentFile._id }
+        ).then((notification) => {
+          console.log("notification updated");
+        });
       }
-    
     }
 
-    new Notification(notificationObj).save().then(notification => {
+    new Notification(notificationObj).save().then((notification) => {
       console.log(notification);
-      return res.status(201).json({ comment, commentedAt, _id:commentFile._id, user_id, children , 'Notification sent' : notification});
-    })
-  })
+      return res.status(201).json({
+        comment,
+        commentedAt,
+        _id: commentFile._id,
+        user_id,
+        children,
+        "Notification sent": notification,
+      });
+    });
+  });
 };
 
 export const getBlogComments = (req, res) => {
   let { blog_id, skip } = req.body;
   let maxLimit = 5;
-  Comment.find({ blog_id, isReply: false }).populate("commented_by", "personal_info.username personal_info.name personal_info.profile_img").skip(skip).limit(maxLimit).sort({
-    'commentedAt':-1
-  })
-    .then(comment => {
+  Comment.find({ blog_id, isReply: false })
+    .populate(
+      "commented_by",
+      "personal_info.username personal_info.name personal_info.profile_img"
+    )
+    .skip(skip)
+    .limit(maxLimit)
+    .sort({
+      commentedAt: -1,
+    })
+    .then((comment) => {
       return res.status(200).json(comment);
-    }).catch(err => {
+    })
+    .catch((err) => {
       console.log(err.message);
-      return res.status(500).json({error:err.message})
-  })
-}
-
+      return res.status(500).json({ error: err.message });
+    });
+};
 
 export const getReply = (req, res) => {
-  
   let { _id, skip } = req.body;
   let maxLimit = 5;
-  Comment.findOne({ _id }).populate({
-    path: "children",
-    options: {
-      limit: maxLimit,
-      skip: skip,
-      sort:{'commentedAt': -1}
-    },
-    populate: {
-      path: "commented_by",
-      select:"personal_info.profile_img personal_info.name personal_info.username"
-    },
-    select:"-blog_id -updatedAt"
-    
-  })
-    .select("children").then(doc => {
-    return res.status(200).json({replies:doc.children})
-    }).catch(err => {
-    return res.status(500).json(err)
-  })
-}
+  Comment.findOne({ _id })
+    .populate({
+      path: "children",
+      options: {
+        limit: maxLimit,
+        skip: skip,
+        sort: { commentedAt: -1 },
+      },
+      populate: {
+        path: "commented_by",
+        select:
+          "personal_info.profile_img personal_info.name personal_info.username",
+      },
+      select: "-blog_id -updatedAt",
+    })
+    .select("children")
+    .then((doc) => {
+      return res.status(200).json({ replies: doc.children });
+    })
+    .catch((err) => {
+      return res.status(500).json(err);
+    });
+};
 
 const deleteComments = (_id) => {
-  Comment.findOneAndDelete({ _id }).then(comment => {
-    if (comment.parent) {
-      Comment.findOneAndUpdate({ _id: comment.parent }, { $pull: { children: _id } }).then(data => {
-        console.log('comment deleted')
-      }).catch(err => console.log(err));
-    }
-    Notification.findOneAndDelete({ comment: _id }).then(notification => console.log("comment notification deleted"))
-    Notification.findOneAndUpdate({ reply: _id },{$unset: {reply:1}}).then(notification => {
-      console.log("reply notification deleted")
+  Comment.findOneAndDelete({ _id })
+    .then((comment) => {
+      if (comment.parent) {
+        Comment.findOneAndUpdate(
+          { _id: comment.parent },
+          { $pull: { children: _id } }
+        )
+          .then((data) => {
+            console.log("comment deleted");
+          })
+          .catch((err) => console.log(err));
+      }
+      Notification.findOneAndDelete({ comment: _id }).then((notification) =>
+        console.log("comment notification deleted")
+      );
+      Notification.findOneAndUpdate(
+        { reply: _id },
+        { $unset: { reply: 1 } }
+      ).then((notification) => {
+        console.log("reply notification deleted");
+      });
+      Blog.findOneAndUpdate(
+        { _id: comment.blog_id },
+        {
+          $pull: { comment: _id },
+          $inc: { "activity.total_comments": -1 },
+          "activity.total_parent_comments": comment.parent ? 0 : -1,
+        }
+      ).then((blog) => {
+        if (comment.children.length) {
+          comment.children.map((replies) => {
+            deleteComments(replies);
+          });
+        }
+      });
     })
-    Blog.findOneAndUpdate({ _id: comment.blog_id }, { $pull: { comment: _id }, $inc: { "activity.total_comments": -1 }, "activity.total_parent_comments": comment.parent ? 0 : -1 }).then(blog => {
-      if (comment.children.length) {
-        comment.children.map(replies => {
-         deleteComments(replies)
-       })
-   }
-})
-  }).catch(err => {
-    console.log(err.message);
-  })
-}
+    .catch((err) => {
+      console.log(err.message);
+    });
+};
 
 export const deleteComment = (req, res) => {
-  
   let user_id = req.user;
   let { _id } = req.body;
-  Comment.findOne({ _id }).then(comment => {
+  Comment.findOne({ _id }).then((comment) => {
     if (user_id == comment.commented_by || user_id == comment.blog_author) {
-       
-      deleteComments(_id)
-      return res.status(200).json({msg:"Successfully deleted the comment."});
+      deleteComments(_id);
+      return res.status(200).json({ msg: "Successfully deleted the comment." });
     } else {
-      return res.status(403).json({error:"You are not able to delete this comment"})
+      return res
+        .status(403)
+        .json({ error: "You are not able to delete this comment" });
     }
-  })
-
-}
+  });
+};
 
 export const Notifications = (req, res) => {
   let user_id = req.user;
   let { page, filter, deletedCount } = req.body;
-     
+
   let maxLimit = 10;
 
   //notification which is equal to the user id
 
   let findQuery = { notification_for: user_id, user: { $ne: user_id } };
-  
+
   let skipDocs = (page - 1) * maxLimit;
 
-  if (filter != "all") { 
+  if (filter != "all") {
     findQuery.type = filter;
-
   }
   if (deletedCount) {
     skipDocs -= deletedCount;
   }
 
-  Notification.find(findQuery).skip(skipDocs).limit(maxLimit).populate("blog", "title blog_id ").populate("user", "personal_info.name personal_info.username personal_info.profile_img").populate("comment", "comment").populate("replied_on_comment", "comment").populate("reply", "comment").sort({ createdAt: -1 }).select("createdAt type seen reply").then(notifications => {
-    Notification.updateMany(findQuery, { seen: true })
-      .skip(skipDocs)
-      .limit(maxLimit).then(() => {
-        console.log('notification seen');
-      })
-    return res.status(200).json({ notifications });
-  }).catch(err => {
-    console.log(err.message);
-    return res.status(500).send("Internal Server Error");
-  })
-  
-
-}
+  Notification.find(findQuery)
+    .skip(skipDocs)
+    .limit(maxLimit)
+    .populate("blog", "title blog_id ")
+    .populate(
+      "user",
+      "personal_info.name personal_info.username personal_info.profile_img"
+    )
+    .populate("comment", "comment")
+    .populate("replied_on_comment", "comment")
+    .populate("reply", "comment")
+    .sort({ createdAt: -1 })
+    .select("createdAt type seen reply")
+    .then((notifications) => {
+      Notification.updateMany(findQuery, { seen: true })
+        .skip(skipDocs)
+        .limit(maxLimit)
+        .then(() => {
+          console.log("notification seen");
+        });
+      return res.status(200).json({ notifications });
+    })
+    .catch((err) => {
+      console.log(err.message);
+      return res.status(500).send("Internal Server Error");
+    });
+};
 
 export const notificationCount = (req, res) => {
-  
   let user_id = req.user;
-   
-  let { filter } = req.body;
-  let findQuery = { notification_for: user_id, user: { $ne: user_id } }
-  if (filter !== 'all') {
-    findQuery.type = filter;
 
+  let { filter } = req.body;
+  let findQuery = { notification_for: user_id, user: { $ne: user_id } };
+  if (filter !== "all") {
+    findQuery.type = filter;
   }
   Notification.countDocuments(findQuery)
     .then((count) => {
       return res.status(200).json({ totalDocs: count });
-    }).catch((error) => {
-      console.log('Error in getting notification count', error);
-      return res.status(500).json({error:err.message});
+    })
+    .catch((error) => {
+      console.log("Error in getting notification count", error);
+      return res.status(500).json({ error: err.message });
     });
-}
+};
 
-export const userWrittenBlogs = (req,res) => {
+export const userWrittenBlogs = (req, res) => {
   let user_id = req.user;
   let { page, draft, query, deletedCount } = req.body;
-  
+
   let maxLimit = 5;
   let skipDocs = (page - 1) * maxLimit;
 
   if (deletedCount) {
-    skipDocs -= deletedCount
+    skipDocs -= deletedCount;
   }
-  Blog.find({ author: user_id, draft, title: new RegExp(query, 'i') }).skip(skipDocs).limit(maxLimit).sort({ publishedAt: -1 }).select("title banner publishedAt blog_id activity des draft -_id").then(blogs => {
-    return res.status(200).json({blogs})
-  }).catch(err => {
-    return res.status(500).json({error:err.message})
-  })
+  Blog.find({ author: user_id, draft, title: new RegExp(query, "i") })
+    .skip(skipDocs)
+    .limit(maxLimit)
+    .sort({ publishedAt: -1 })
+    .select("title banner publishedAt blog_id activity des draft -_id")
+    .then((blogs) => {
+      return res.status(200).json({ blogs });
+    })
+    .catch((err) => {
+      return res.status(500).json({ error: err.message });
+    });
+};
 
-}
-
-
-export const userWrittenCount = (req,res) => {
+export const userWrittenCount = (req, res) => {
   let user_id = req.user;
   let { draft, query } = req.body;
-  Blog.countDocuments({ author: user_id, draft, title: new RegExp(query, 'i') }).then(count => {
-    return res.status(200).json({totalDocs : count})
-  }).catch(err => {
-    console.log(err.message);
-    return res.status(500).json({error:err.message})
-  })
-}
-
+  Blog.countDocuments({ author: user_id, draft, title: new RegExp(query, "i") })
+    .then((count) => {
+      return res.status(200).json({ totalDocs: count });
+    })
+    .catch((err) => {
+      console.log(err.message);
+      return res.status(500).json({ error: err.message });
+    });
+};
 
 export const deleteBlog = (req, res) => {
   let user_id = req.user;
   let { blog_id } = req.body;
 
-  Blog.findOneAndDelete({ blog_id }).then(blog => {
-    Notification.deleteMany({ blog: blog._id }).then(data => {
-      console.log('notification deleted')
-    })
-    Comment.deleteMany({ blog_id: blog._id }).then(data => {
-      console.log('comments deleted');
+  Blog.findOneAndDelete({ blog_id }).then((blog) => {
+    Notification.deleteMany({ blog: blog._id }).then((data) => {
+      console.log("notification deleted");
+    });
+    Comment.deleteMany({ blog_id: blog._id }).then((data) => {
+      console.log("comments deleted");
     });
 
-    User.findByIdAndUpdate({ _id: user_id }, { $pull: { blog: blog._id }, $inc: { 'account_info.total_posts': -1 } }).then(user => {
-      console.log('Blog deleted')
-      return res.status(200).json({status:'Done'})
-    }).catch(err => {
-      return res.status(500).json({error:err.message})
-    })
+    User.findByIdAndUpdate(
+      { _id: user_id },
+      { $pull: { blog: blog._id }, $inc: { "account_info.total_posts": -1 } }
+    )
+      .then((user) => {
+        console.log("Blog deleted");
+        return res.status(200).json({ status: "Done" });
+      })
+      .catch((err) => {
+        return res.status(500).json({ error: err.message });
+      });
+  });
+};
 
-  })
-}
-
-export const forgotPassword =async (req, res) => {
+export const forgotPassword = async (req, res) => {
   const { email, password } = req.body;
   const user = await User.findOne({ "personal_info.email": email });
   if (!user) {
@@ -975,10 +1077,9 @@ export const forgotPassword =async (req, res) => {
   res.json({ token });
 
   // const token =jwt.sign({id:user._id},ACCESS_KEY,{expiresIn:'1h'});
-}
-
+};
 
 export const resetPassword = async (req, res) => {
   const { id, token } = req.params;
   console.log(req.params);
-}
+};
